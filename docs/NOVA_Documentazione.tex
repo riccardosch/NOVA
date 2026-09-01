@@ -1,0 +1,46 @@
+\documentclass[11pt,a4paper]{article}
+\input{preamble.tex}
+
+\def\oggidata{26 agosto 2026}
+
+\begin{document}
+\sffamily
+
+\thispagestyle{empty}
+\vspace*{3cm}
+\begin{center}
+  {\color{novaNavy}\fontsize{40}{44}\selectfont\bfseries NOVA}\\[8pt]
+  {\color{novaCyan}\Large Documentazione}\\[12pt]
+  {\color{novaGray}\large Gaze-guided Salient Object Ranking}\\[2.2cm]
+
+  {\large\color{novaInk} Riccardo Schiavo \quad$\cdot$\quad Eros Patarini}\\[6pt]
+  {\color{novaInk} Industrial Applications of Computer Vision}\\
+  {\color{novaInk} Università degli Studi di Padova --- A.A. 2025--26}\\[1.2cm]
+
+  {\color{novaGray}\small \oggidata}
+\end{center}
+
+\vfill
+\begin{nota}
+\textbf{Come è organizzato questo documento.}
+
+\medskip
+La \textbf{Parte I} spiega il funzionamento generale: il problema, la pipeline dall'immagine alle
+metriche, l'architettura del codice.
+
+\medskip
+La \textbf{Parte II} scende nel dettaglio, file per file: per ognuno la funzione che svolge, poi
+il codice sezionato riga per riga con il motivo di ogni scelta. I file sono presentati in ordine
+di dipendenza, così non si incontra mai un riferimento a qualcosa non ancora spiegato.
+\end{nota}
+\vspace{0.6cm}
+
+\newpage
+\tableofcontents
+\newpage
+
+\input{parte1.tex}
+\input{parte2.tex}
+\input{parte3.tex}
+
+\end{document}

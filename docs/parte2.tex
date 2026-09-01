@@ -1,0 +1,555 @@
+\section{\texttt{src/baselines/itti\_koch.py}}
+
+Riferimento: Itti, Koch \& Niebur, \emph{A Model of Saliency-Based Visual Attention for Rapid
+Scene Analysis}, IEEE TPAMI 1998. Il file più articolato del progetto: una funzione pubblica e
+quattro funzioni di supporto.
+
+\subsection{L'idea}
+
+\textbf{Un punto è saliente se spicca rispetto a ciò che lo circonda.} Il modello non riconosce
+oggetti: misura contrasto locale su tre canali che il sistema visivo umano elabora in parallelo
+nelle prime fasi della visione.
+
+\begin{center}
+\begin{tabular}{l p{9.4cm}}
+\toprule
+\rowcolor{tblHead}\textcolor{white}{\textbf{Canale}} & \textcolor{white}{\textbf{Corrispettivo biologico}} \\
+\midrule
+Intensità & Contrasto di luminanza, la via più antica ed elementare. \\
+\rowcolor{tblAlt} Colore & Opponenza rosso/verde e blu/giallo: è il modo in cui la retina codifica
+effettivamente il colore, tramite cellule gangliari antagoniste. \\
+Orientazione & Filtri di Gabor a 0°, 45°, 90°, 135°: modello classico delle cellule semplici
+della corteccia visiva primaria (V1). \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Le funzioni di supporto}
+
+\subsubsection{\texttt{\_gaussian\_pyramid}}
+
+\begin{idebox}
+\begin{pycode}
+def _gaussian_pyramid(channel, levels):
+    pyramid = [channel.astype(np.float32)]
+    for _ in range(levels - 1):
+        pyramid.append(cv2.pyrDown(pyramid[-1]).astype(np.float32))
+    return pyramid
+\end{pycode}
+\end{idebox}
+
+Restituisce una \emph{lista} di array: \pyin{pyramid[0]} è l'immagine originale,
+\pyin{pyramid[1]} è a metà risoluzione, \pyin{pyramid[2]} a un quarto, e così via.
+
+Ogni livello si costruisce da \pyin{pyramid[-1]}, cioè dall'ultimo aggiunto: la riduzione è
+cumulativa.
+
+\begin{nota}
+\textbf{A cosa serve la piramide.} Permette di guardare la scena ``a più distanze'': un dettaglio
+fine e un oggetto grande producono contrasto a scale diverse, e senza la piramide se ne
+coglierebbe solo una.
+
+\medskip
+\pyin{cv2.pyrDown} non si limita a scartare pixel: applica prima una sfocatura Gaussiana e poi
+sottocampiona. Senza la sfocatura si avrebbe aliasing.
+\end{nota}
+
+\subsubsection{\texttt{\_resize\_to}}
+
+\begin{idebox}
+\begin{pycode}
+def _resize_to(feature_map, shape):
+    return cv2.resize(feature_map, (shape[1], shape[0]),
+                      interpolation=cv2.INTER_LINEAR)
+\end{pycode}
+\end{idebox}
+
+Wrapper minimale che esiste per un solo motivo: \textbf{isolare in un punto unico} l'inversione
+\pyin{(height, width)} $\to$ \pyin{(width, height)}. Lo scambio \pyin{shape[1], shape[0]} compare
+così una volta sola nel modulo, invece che in ogni punto in cui serve un resize.
+
+\subsubsection{\texttt{\_center\_surround}}
+
+\begin{idebox}
+\begin{pycode}
+def _center_surround(pyramid, center_scales=(2, 3), deltas=(3, 4)):
+    maps = []
+    for c in center_scales:
+        for delta in deltas:
+            s = c + delta
+            if s >= len(pyramid):
+                continue
+            center = pyramid[c]
+            surround = _resize_to(pyramid[s], center.shape[:2])
+            maps.append(np.abs(center - surround))
+    return maps
+\end{pycode}
+\end{idebox}
+
+Doppio ciclo su $c \in \{2,3\}$ (scala \emph{center}, il dettaglio) e $\delta \in \{3,4\}$, con
+$s = c + \delta$ (scala \emph{surround}, il contesto). Le quattro combinazioni sono
+$(2,5), (2,6), (3,6), (3,7)$.
+
+Il \pyin{continue} salta le combinazioni in cui $s$ eccede i livelli disponibili: con
+\pyin{pyramid_levels=7} (indici $0$--$6$) la coppia $(3,7)$ viene scartata, restano tre mappe per
+canale.
+
+Prima della sottrazione, la scala grossolana viene riportata alla risoluzione di quella fine:
+sono array di dimensioni diverse e non si potrebbero sottrarre direttamente. Il valore assoluto
+serve perché conta l'\emph{entità} del contrasto, non il suo segno --- chiaro su scuro e scuro su
+chiaro sono entrambi salienti.
+
+È l'analogo computazionale dei campi recettivi center-surround dei neuroni retinici.
+
+\subsubsection{\texttt{\_normalize\_map} --- l'operatore \texorpdfstring{$N(\cdot)$}{N()}}
+
+La funzione concettualmente più densa del progetto.
+
+\begin{idebox}
+\begin{pycode}
+def _normalize_map(feature_map, M=10.0):
+    feature_map = feature_map - feature_map.min()
+    if feature_map.max() > 0:
+        feature_map = feature_map / feature_map.max() * M
+
+    local_max = cv2.dilate(feature_map, np.ones((7, 7), np.uint8))
+    is_local_max = (feature_map == local_max) & (feature_map < M - 1e-3)
+    peaks = feature_map[is_local_max]
+    mean_peak = peaks.mean() if peaks.size > 0 else 0.0
+
+    return feature_map * (M - mean_peak) ** 2
+\end{pycode}
+\end{idebox}
+
+\paragraph{Righe 1--3: portare la mappa in $[0, M]$.}
+Scala lineare in un intervallo noto, con $M = 10$ (valore del paper). La scelta esatta è
+arbitraria: conta il \emph{rapporto} fra $M$ e la media dei picchi.
+
+\paragraph{Riga 5: trovare i massimi locali con una dilatazione.}
+\pyin{cv2.dilate} sostituisce ogni pixel con il massimo della sua vicinanza $7\times7$. Di
+conseguenza, un pixel che dopo la dilatazione \emph{vale ancora quanto prima} è esattamente un
+massimo locale. È un trucco elegante: identifica tutti i massimi locali con una singola
+operazione morfologica invece che con una scansione esplicita.
+
+\paragraph{Riga 6: escludere il massimo globale.}
+La condizione \pyin{feature_map < M - 1e-3} scarta il picco più alto, che vale esattamente $M$
+dopo la normalizzazione. Interessa la media degli \emph{altri} picchi: è quella che dice se la
+mappa ha un vincitore netto o tanti competitori.
+
+\paragraph{Righe 7--8: la media dei picchi, con guardia.}
+\pyin{peaks.size > 0} protegge dal caso in cui non ci siano massimi locali oltre al globale:
+\pyin{.mean()} su un array vuoto restituirebbe NaN con un warning.
+
+\paragraph{Riga 10: il fattore di enfasi.}
+\[
+N(\text{mappa}) = \text{mappa} \times (M - \bar{m})^2
+\]
+dove $\bar{m}$ è la media dei massimi locali.
+
+\begin{center}
+\begin{tabular}{l l l}
+\toprule
+\rowcolor{tblHead}\textcolor{white}{\textbf{Situazione}} & \textcolor{white}{$\bar{m}$} & \textcolor{white}{\textbf{Effetto}} \\
+\midrule
+Un solo picco netto & bassa & $(M-\bar m)^2$ grande $\to$ mappa \textbf{amplificata} \\
+\rowcolor{tblAlt} Molti picchi simili & alta & $(M-\bar m)^2$ piccolo $\to$ mappa \textbf{soppressa} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{nota}
+\textbf{Perché conta.} Due mappe possono avere lo stesso valore massimo ma significato opposto:
+una con un picco isolato indica un elemento davvero distintivo, una con venti picchi di altezza
+simile indica rumore diffuso.
+
+\medskip
+Senza $N(\cdot)$ un canale rumoroso dominerebbe la somma finale per pura forza bruta. È il
+meccanismo che rende il modello \emph{selettivo} invece che additivo --- ed è anche la parte del
+paper originale che viene più spesso semplificata nelle reimplementazioni, inclusa la nostra.
+\end{nota}
+
+\subsection{La funzione principale}
+
+\subsubsection{Estrazione dei canali}
+
+\begin{idebox}
+\begin{pycode}
+img = image.astype(np.float32)
+b, g, r = cv2.split(img)
+
+intensity = (r + g + b) / 3.0
+
+eps = 1e-3
+rg = (r - g) / (intensity + eps)
+by = (b - np.minimum(r, g)) / (intensity + eps)
+\end{pycode}
+\end{idebox}
+
+\pyin{cv2.split} separa i tre canali. L'ordine di destrutturazione è \pyin{b, g, r} perché
+OpenCV usa BGR.
+
+Le formule di opponenza cromatica riproducono il modo in cui la retina umana codifica il colore:
+non come tre canali indipendenti, ma come \emph{differenze} tra coppie antagoniste. Il giallo è
+approssimato da \pyin{np.minimum(r, g)}, dato che percettivamente è la componente comune a rosso
+e verde.
+
+\begin{nota}
+\textbf{Perché dividere per l'intensità.} Normalizza rispetto alla luminosità: un rosso acceso in
+ombra e lo stesso rosso in piena luce hanno valori RGB molto diversi ma la stessa \emph{tinta}.
+Dividendo per \pyin{intensity} il canale misura la tinta indipendentemente dall'illuminazione.
+
+\medskip
+\pyin{eps = 1e-3} evita la divisione per zero nelle zone quasi nere, dove il colore è comunque
+privo di significato percettivo.
+\end{nota}
+
+\subsubsection{Filtri di Gabor}
+
+\begin{idebox}
+\begin{pycode}
+orientation_pyramids = []
+for theta_deg in (0, 45, 90, 135):
+    kernel = cv2.getGaborKernel(
+        ksize=(15, 15), sigma=4.0, theta=np.radians(theta_deg),
+        lambd=10.0, gamma=0.5, psi=0,
+    )
+    orientation_pyramids.append(
+        [cv2.filter2D(level, cv2.CV_32F, kernel) for level in intensity_pyr]
+    )
+\end{pycode}
+\end{idebox}
+
+Un filtro di Gabor è una sinusoide modulata da una Gaussiana: risponde fortemente ai bordi che
+hanno l'orientamento e la frequenza spaziale a cui è sintonizzato.
+
+\begin{center}
+\begin{tabular}{>{\ttfamily}l l p{6.6cm}}
+\toprule
+\rowcolor{tblHead}\textcolor{white}{\textbf{Parametro}} & \textcolor{white}{\textbf{Valore}} & \textcolor{white}{\textbf{Significato}} \\
+\midrule
+ksize & (15,15) & Dimensione del kernel: deve contenere almeno un periodo della sinusoide. \\
+\rowcolor{tblAlt} sigma & 4.0 & Ampiezza dell'inviluppo Gaussiano: quanto è esteso il filtro. \\
+theta & 0--135° & Orientamento a cui è sensibile. \pyin{np.radians} converte: OpenCV vuole radianti. \\
+\rowcolor{tblAlt} lambd & 10.0 & Lunghezza d'onda della sinusoide: la ``spaziatura'' dei bordi cercati. \\
+gamma & 0.5 & Rapporto d'aspetto: allunga il filtro, rendendolo più selettivo sull'orientamento. \\
+\rowcolor{tblAlt} psi & 0 & Sfasamento. A 0 il filtro è simmetrico. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Il filtro si applica a \emph{tutti} i livelli della piramide di intensità: da qui la list
+comprehension interna. Il risultato sono 4 piramidi, una per orientamento.
+
+\pyin{cv2.CV_32F} forza l'output in float: la risposta di Gabor può essere negativa e su
+\pyin{uint8} verrebbe troncata.
+
+\subsubsection{Conspicuity map e combinazione finale}
+
+\begin{idebox}
+\begin{pycode}
+target_shape = intensity_maps[0].shape
+
+def combine(maps):
+    resized = [_resize_to(m, target_shape) for m in maps]
+    return _normalize_map(np.sum(resized, axis=0))
+
+conspicuity_intensity = combine(intensity_maps)
+conspicuity_color = combine(color_maps)
+conspicuity_orientation = combine(orientation_maps)
+
+saliency = (conspicuity_intensity
+            + conspicuity_color
+            + conspicuity_orientation) / 3.0
+\end{pycode}
+\end{idebox}
+
+Le mappe center-surround provengono da scale diverse e hanno quindi \emph{dimensioni diverse}:
+\pyin{combine} le riporta tutte a una risoluzione comune prima di sommarle.
+\pyin{np.sum(resized, axis=0)} somma lungo l'asse della lista, cioè elemento per elemento.
+
+Notare la \textbf{doppia normalizzazione}: prima su ogni singola mappa center-surround, poi di
+nuovo sulla somma. Serve perché il confronto avviene a due livelli --- prima tra le scale dello
+stesso canale, poi tra i tre canali.
+
+La media finale è \emph{non pesata}: i pesi ottimali sarebbero un parametro da apprendere, e il
+modello originale è deliberatamente privo di apprendimento.
+
+\subsection{Semplificazioni dichiarate}
+
+Rispetto al paper originale:
+
+\begin{enumerate}
+  \item Coppie di scale center-surround fisse ($c \in \{2,3\}$, $\delta \in \{3,4\}$) invece di
+  un set più ampio.
+  \item Operatore $N(\cdot)$ a singolo passaggio invece che iterativo.
+\end{enumerate}
+
+Entrambe riducono il costo computazionale mantenendo il comportamento qualitativo.
+\textbf{Vanno dichiarate nel README}: una semplificazione documentata è una scelta di progetto,
+una non documentata è un errore.
+
+\section{\texttt{src/annotation/store.py}}
+
+Gestisce la lettura e la scrittura delle annotazioni.
+
+\subsection{Il protocollo}
+
+L'annotatore guarda un'immagine e clicca \textbf{in ordine di importanza decrescente}. Minimo 3
+click, massimo 6.
+
+\begin{idebox}
+\begin{pycode}
+MIN_CLICKS = 3   # sotto, non esiste un ranking sensato
+MAX_CLICKS = 6   # sopra, si cercano cose da cliccare invece di notarle
+\end{pycode}
+\end{idebox}
+
+\begin{nota}
+\textbf{Un compito, due ground truth.} L'ordine dei click non è un dettaglio accessorio: rende lo
+stesso gesto utile per due scopi.
+\begin{itemize}
+  \item i click come \emph{punti di fissazione} $\to$ metriche NSS, AUC-Judd;
+  \item l'ordine come \emph{ranking} di importanza $\to$ Spearman, Kendall, Top-1.
+\end{itemize}
+Un secondo giro di annotazione per il ranking raddoppierebbe il lavoro degli annotatori, che è la
+risorsa più scarsa.
+\end{nota}
+
+\subsection{Il formato su disco}
+
+Un file JSON \textbf{per annotatore}, non un file unico:
+
+\begin{idebox}
+\begin{Verbatim}[commandchars=\\\{\},fontsize=\footnotesize]
+\textcolor{ideFg}{data/annotations/riccardo.json}
+
+\textcolor{ideFg}{\{}
+  \textcolor{ideFunc}{"annotator"}\textcolor{ideFg}{: "riccardo",}
+  \textcolor{ideFunc}{"created_at"}\textcolor{ideFg}{: "2026-08-26T18:00:00+00:00",}
+  \textcolor{ideFunc}{"annotations"}\textcolor{ideFg}{: \{}
+    \textcolor{ideFunc}{"img_001.jpg"}\textcolor{ideFg}{: \{}
+      \textcolor{ideFunc}{"image_size"}\textcolor{ideFg}{: [480, 640],}
+      \textcolor{ideFunc}{"clicks"}\textcolor{ideFg}{: [\{"x": 412, "y": 230, "order": 1\}, ...]}
+    \textcolor{ideFg}{\}}
+  \textcolor{ideFg}{\}}
+\textcolor{ideFg}{\}}
+\end{Verbatim}
+\end{idebox}
+
+\begin{nota}
+\textbf{Perché un file per annotatore.} Più persone possono annotare in parallelo senza conflitti
+di scrittura, ed escludere un annotatore a posteriori diventa banale (si cancella il suo file).
+Un file unico richiederebbe un meccanismo di lock, o produrrebbe sovrascritture silenziose.
+
+\medskip
+\textbf{Perché salvare \texttt{image\_size}.} Senza le dimensioni, le coordinate sono prive di
+significato: se l'immagine venisse ridimensionata o sostituita, i click punterebbero altrove
+senza che nulla lo segnali.
+\end{nota}
+
+\subsection{\texttt{\_\_init\_\_} --- normalizzazione del nome}
+
+\begin{idebox}
+\begin{pycode}
+if not annotator or not annotator.strip():
+    raise ValueError("Il nome dell'annotatore non puo' essere vuoto.")
+
+self.annotator = annotator.strip().lower().replace(" ", "_")
+self.annotations_dir = annotations_dir
+self.path = os.path.join(annotations_dir, f"{self.annotator}.json")
+self._data = self._load()
+\end{pycode}
+\end{idebox}
+
+La catena \pyin{strip().lower().replace(" ", "_")} evita che ``Riccardo'', ``riccardo'' e
+``Riccardo~'' diventino tre annotatori distinti --- errore facile quando si digita il nome a
+inizio sessione.
+
+\subsection{\texttt{\_save} --- scrittura atomica}
+
+\begin{idebox}
+\begin{pycode}
+def _save(self):
+    os.makedirs(self.annotations_dir, exist_ok=True)
+    tmp_path = self.path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(self._data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp_path, self.path)
+\end{pycode}
+\end{idebox}
+
+Si scrive su un file temporaneo e poi lo si rinomina.
+
+\begin{attenzione}
+\textbf{Perché non scrivere direttamente sul file finale.} Se il processo venisse interrotto a
+metà scrittura (crash, chiusura del terminale), il file resterebbe troncato --- JSON non valido,
+\emph{tutte} le annotazioni precedenti perse.
+
+\medskip
+\pyin{os.replace} è \textbf{atomico} sulla maggior parte dei filesystem: o il file nuovo
+sostituisce il vecchio per intero, o non succede nulla. Con sessioni da decine di minuti, questa
+protezione non è teorica.
+\end{attenzione}
+
+\pyin{ensure_ascii=False} preserva gli accenti nei nomi invece di trasformarli in sequenze di
+escape.
+
+\subsection{\texttt{save\_annotation}}
+
+\begin{idebox}
+\begin{pycode}
+if not MIN_CLICKS <= len(clicks) <= MAX_CLICKS:
+    raise ValueError(
+        f"Servono da {MIN_CLICKS} a {MAX_CLICKS} click, ricevuti {len(clicks)}."
+    )
+self._data["annotations"][image_name] = {
+    "image_size": list(image_size),
+    "clicks": [
+        {"x": int(x), "y": int(y), "order": i + 1}
+        for i, (x, y) in enumerate(clicks)
+    ],
+    "annotated_at": datetime.now(timezone.utc).isoformat(),
+}
+self._save()
+\end{pycode}
+\end{idebox}
+
+L'\pyin{order} si deriva dalla \emph{posizione nella lista}: \pyin{enumerate(clicks)} con
+\pyin{i + 1} produce 1, 2, 3\ldots Il chiamante non deve tracciarlo, quindi non può sbagliarlo.
+
+Il salvataggio avviene a ogni chiamata, non a fine sessione: è il salvataggio incrementale.
+
+\subsection{\texttt{load\_all\_annotations}}
+
+\begin{idebox}
+\begin{pycode}
+for filename in sorted(os.listdir(annotations_dir)):
+    if not filename.endswith(".json"):
+        continue
+    ...
+    for image_name, record in data.get("annotations", {}).items():
+        if image_name not in aggregated:
+            aggregated[image_name] = {
+                "image_size": record["image_size"],
+                "annotators": {},
+            }
+        aggregated[image_name]["annotators"][annotator] = record["clicks"]
+\end{pycode}
+\end{idebox}
+
+Inverte l'organizzazione dei dati: da \emph{per annotatore} a \emph{per immagine}. È la forma
+utile per costruire la ground truth, che deve unire le opinioni di tutti su una stessa immagine.
+
+Il filtro \pyin{.endswith(".json")} ignora i file \pyin{.tmp} eventualmente rimasti da una
+scrittura interrotta.
+
+\section{\texttt{src/annotation/ground\_truth.py}}
+
+Converte i click in ground truth utilizzabile dalle metriche.
+
+\subsection{Due rappresentazioni, non una}
+
+\begin{center}
+\begin{tabular}{l l p{5.8cm}}
+\toprule
+\rowcolor{tblHead}\textcolor{white}{\textbf{Rappresentazione}} & \textcolor{white}{\textbf{Forma}} & \textcolor{white}{\textbf{Metriche che la usano}} \\
+\midrule
+Mappa di fissazione & binaria, sparsa & NSS, AUC-Judd \\
+\rowcolor{tblAlt} Heatmap continua & Gaussiane sommate & CC, SIM, KL \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Non è ridondanza: NSS chiede ``quanto vale la saliency \emph{esattamente} sui punti guardati?'' e
+sfumare i punti falserebbe la domanda; CC confronta due distribuzioni, e la ground truth deve
+essere continua quanto la predizione.
+
+È la stessa doppia rappresentazione dei benchmark di riferimento (MIT/Tübingen).
+
+\subsection{\texttt{clicks\_to\_fixation\_map}}
+
+\begin{idebox}
+\begin{pycode}
+height, width = image_size
+fixation_map = np.zeros((height, width), dtype=np.float32)
+
+for click in clicks:
+    x = int(np.clip(click["x"], 0, width - 1))
+    y = int(np.clip(click["y"], 0, height - 1))
+    fixation_map[y, x] = 1.0
+
+return fixation_map
+\end{pycode}
+\end{idebox}
+
+Il \pyin{np.clip} protegge da coordinate fuori dai bordi: un click sul bordo estremo
+dell'interfaccia può produrre un valore pari alla larghezza, che come indice sarebbe fuori range.
+Senza clip si avrebbe un \pyin{IndexError} a metà sessione, con perdita del lavoro in corso.
+
+Notare \pyin{fixation_map[y, x]} --- riga prima, colonna dopo.
+
+\subsection{\texttt{clicks\_to\_heatmap}}
+
+\begin{idebox}
+\begin{pycode}
+sigma = sigma_frac * width
+y_grid, x_grid = np.mgrid[0:height, 0:width].astype(np.float32)
+
+for click in clicks:
+    squared_distance = (x_grid - click["x"]) ** 2 + (y_grid - click["y"]) ** 2
+    heatmap += np.exp(-squared_distance / (2.0 * sigma ** 2))
+
+max_value = heatmap.max()
+if max_value > 0:
+    heatmap /= max_value
+\end{pycode}
+\end{idebox}
+
+\pyin{np.mgrid[0:height, 0:width]} costruisce le griglie di coordinate in una riga, ed è calcolata
+\emph{fuori} dal ciclo: viene riusata per ogni click invece di essere ricostruita.
+
+Le Gaussiane si \textbf{sommano}. Dove più click sono vicini i contributi si sovrappongono e il
+valore cresce: è così che il consenso tra annotatori emerge automaticamente.
+
+\subsubsection{Il valore di \texorpdfstring{$\sigma$}{sigma}}
+
+\begin{idebox}
+\begin{pycode}
+DEFAULT_SIGMA_FRAC = 0.05
+\end{pycode}
+\end{idebox}
+
+\begin{nota}
+\textbf{Non è un numero arbitrario.} Il 5\% della larghezza approssima l'ampiezza della fovea
+--- circa 1 grado di angolo visivo --- alle distanze di osservazione tipiche di uno schermo.
+
+\medskip
+L'idea sottostante: quando si guarda un punto non si vede nitidamente \emph{solo} quel pixel. La
+visione ad alta risoluzione copre una piccola regione attorno al punto di fissazione, e la
+Gaussiana modella esattamente questo.
+
+\medskip
+È espresso come frazione e non in pixel, per lo stesso motivo del center prior: coerenza a
+risoluzioni diverse. È una scelta da saper giustificare all'orale.
+\end{nota}
+
+\subsection{\texttt{aggregate\_annotators\_heatmap}}
+
+\begin{idebox}
+\begin{pycode}
+all_clicks = []
+for clicks in annotators_clicks.values():
+    all_clicks.extend(clicks)
+return clicks_to_heatmap(all_clicks, image_size, sigma_frac=sigma_frac)
+\end{pycode}
+\end{idebox}
+
+Tutti i click di tutti gli annotatori confluiscono in \textbf{un'unica nuvola di punti}, da cui
+si genera una sola heatmap.
+
+\begin{nota}
+\textbf{L'alternativa scartata.} Costruire una heatmap per annotatore e poi farne la media sembra
+equivalente, ma non lo è: la normalizzazione individuale (dividere per il massimo) amplificherebbe
+il contributo di chi ha fatto 3 click rispetto a chi ne ha fatti 6. Aggregando prima e
+normalizzando dopo, ogni click vale uguale.
+\end{nota}

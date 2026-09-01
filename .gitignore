@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+
+# dataset e risultati generati: non vanno versionati
+data/eval/*
+data/annotations/*
+results/*
+!data/eval/.gitkeep
+!data/annotations/.gitkeep
+!results/.gitkeep
