@@ -12,6 +12,8 @@ Aggiungere un modello significa modificare QUESTO file e nient'altro.
 from src.baselines.center_prior import center_prior_saliency
 from src.baselines.spectral_residual import spectral_residual_saliency
 from src.baselines.itti_koch import itti_koch_saliency
+from src.models.msi_net import msinet_saliency
+from src.models.deepgaze import deepgaze_saliency
 
 
 # nome -> (funzione, vuole_immagine_intera)
@@ -19,6 +21,8 @@ _REGISTRY = {
     "Center Prior": (center_prior_saliency, False),
     "Spectral Residual": (spectral_residual_saliency, True),
     "Itti-Koch": (itti_koch_saliency, True),
+    "MSI-Net": (msinet_saliency, True),
+    "DeepGaze IIE": (deepgaze_saliency, True),
 }
 
 AVAILABLE_MODELS = list(_REGISTRY.keys())

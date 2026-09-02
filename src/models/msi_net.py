@@ -1,11 +1,11 @@
 """
 MSI-Net — Multi-Scale Information Network (Kroner et al., 2020)
 
-Wrapper per il modello di saliency pre-addestrato, caricato da HuggingFace Hub
-nella versione convertita a TensorFlow 2 / Keras.
+Wrapper per il modello di saliency pre-addestrato, caricato da Kaggle Hub
+tramite tensorflow_hub.
 
-    from huggingface_hub import from_pretrained_keras
-    model = from_pretrained_keras("alexanderkroner/MSI-Net")
+Installazione:
+    pip install tensorflow tensorflow_hub
 
 Riferimento originale:
     A. Kroner, M. Senden, K. Driessens, R. Goebel,
@@ -28,10 +28,10 @@ _model = None
 
 
 def is_available() -> bool:
-    """Ritorna True se tensorflow e huggingface_hub sono installati."""
+    """Ritorna True se tensorflow e tensorflow_hub sono installati."""
     try:
         import tensorflow          # noqa: F401
-        import huggingface_hub     # noqa: F401
+        import tensorflow_hub      # noqa: F401
         return True
     except ImportError:
         return False
@@ -41,17 +41,19 @@ def _check_deps():
     """Solleva ImportError se le dipendenze mancano."""
     if not is_available():
         raise ImportError(
-            "MSI-Net richiede: pip install tensorflow huggingface_hub"
+            "MSI-Net richiede: pip install tensorflow tensorflow_hub"
         )
 
 
 def _load_model():
-    """Carica il modello da HuggingFace Hub (una sola volta)."""
+    """Carica il modello da Kaggle Hub via tensorflow_hub (una sola volta)."""
     global _model
     if _model is None:
         _check_deps()
-        from huggingface_hub import from_pretrained_keras
-        _model = from_pretrained_keras("alexanderkroner/MSI-Net")
+        import tensorflow_hub as hub
+        _model = hub.load(
+            "https://www.kaggle.com/models/alexanderkroner/msi-net/tensorFlow2/salicon/1"
+        ).signatures["serving_default"]
     return _model
 
 
@@ -93,8 +95,16 @@ def msinet_saliency(image_bgr):
     tensor = image_resized.astype(np.float32) / 255.0
     tensor = tensor[np.newaxis, ...]
 
-    # Inferenza
-    output = model(tensor)
+    # Inferenza — il modello è una signature TF, richiede tf.constant
+    import tensorflow as tf
+    tensor = tf.constant(tensor)
+    outputs = model(tensor)
+
+    # La signature restituisce un dict di tensori; estraiamo l'unico valore
+    if isinstance(outputs, dict):
+        output = list(outputs.values())[0].numpy()
+    else:
+        output = outputs.numpy()
 
     # Rimuovi dimensioni di batch/canale
     saliency = np.squeeze(output)
