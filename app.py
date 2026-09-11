@@ -1,11 +1,4 @@
-"""
-NOVA — Interfaccia Gradio per il confronto modelli di visual saliency.
 
-Uso:
-    python app.py
-
-Apre un server web locale con interfaccia Gradio.
-"""
 
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = ""   # forza CPU — evita segfault TF/PyTorch
@@ -15,13 +8,13 @@ import numpy as np
 import gradio as gr
 
 from src.registry import AVAILABLE_MODELS, compute_saliency
-from src.visualization import overlay_saliency, saliency_to_heatmap, mark_peak
+from src.gaze_visual import overlay_saliency, saliency_to_heatmap, mark_peak
 
 MAX_SIDE = 800
 
 
 def _resize_if_needed(image_bgr):
-    """Ridimensiona se troppo grande."""
+
     h, w = image_bgr.shape[:2]
     scale = MAX_SIDE / max(h, w)
     if scale < 1.0:
@@ -34,7 +27,7 @@ def _resize_if_needed(image_bgr):
 
 
 def analyze(image_rgb, model_name):
-    """Calcola saliency e restituisce overlay + heatmap."""
+
     if image_rgb is None:
         return None, None
 

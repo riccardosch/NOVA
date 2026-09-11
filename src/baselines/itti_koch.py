@@ -1,37 +1,8 @@
-"""
-Itti-Koch (IEEE TPAMI, 1998): saliency da contrasto center-surround.
-
-Un punto e' saliente se spicca rispetto a cio' che lo circonda. Il modello
-misura questo contrasto su tre canali che il sistema visivo umano elabora in
-parallelo nelle prime fasi della visione: intensita', colore (opponenza
-rosso/verde e blu/giallo, come nella retina) e orientazione (filtri di
-Gabor, che modellano le cellule della corteccia visiva primaria).
-
-Semplificazioni rispetto al paper originale, dichiarate:
-  1. Coppie di scale center-surround fisse invece di un set piu' ampio.
-  2. Operatore di normalizzazione a singolo passaggio invece che iterativo.
-Riducono il costo mantenendo il comportamento qualitativo del modello.
-"""
-
 import numpy as np
 import cv2
 
 
 def itti_koch_saliency(image, pyramid_levels=7):
-    """Saliency map di Itti-Koch per un'immagine BGR.
-
-    Parameters
-    ----------
-    image : np.ndarray, uint8, shape (h, w, 3)
-        Immagine BGR (convenzione OpenCV).
-    pyramid_levels : int
-        Livelli della piramide Gaussiana: piu' livelli = si catturano
-        contrasti a scale piu' grandi.
-
-    Returns
-    -------
-    np.ndarray, float32, shape (h, w), valori in [0, 1].
-    """
     img = image.astype(np.float32)
     b, g, r = cv2.split(img)
 
@@ -98,12 +69,6 @@ def itti_koch_saliency(image, pyramid_levels=7):
 
 
 def _gaussian_pyramid(channel, levels):
-    """Lista di versioni via via dimezzate dello stesso canale.
-
-    Serve a guardare la scena "a piu' distanze": un dettaglio fine e un
-    oggetto grande producono contrasto a scale diverse. cv2.pyrDown sfoca
-    prima di sottocampionare, evitando aliasing.
-    """
     pyramid = [channel.astype(np.float32)]
     for _ in range(levels - 1):
         pyramid.append(cv2.pyrDown(pyramid[-1]).astype(np.float32))
@@ -111,22 +76,11 @@ def _gaussian_pyramid(channel, levels):
 
 
 def _resize_to(feature_map, shape):
-    """Riporta una mappa a (altezza, larghezza) indicate.
-
-    Esiste per isolare in un punto solo l'inversione shape -> (w, h) che
-    cv2.resize richiede.
-    """
     return cv2.resize(feature_map, (shape[1], shape[0]),
                       interpolation=cv2.INTER_LINEAR)
 
 
 def _center_surround(pyramid, center_scales=(2, 3), deltas=(3, 4)):
-    """Differenze |scala fine - scala grossolana|.
-
-    La scala fine ("center") vede il dettaglio, quella grossolana
-    ("surround") il contesto attorno: la differenza in valore assoluto
-    misura quanto il dettaglio si stacca dallo sfondo.
-    """
     maps = []
     for c in center_scales:
         for delta in deltas:
@@ -140,14 +94,6 @@ def _center_surround(pyramid, center_scales=(2, 3), deltas=(3, 4)):
 
 
 def _normalize_map(feature_map, M=10.0):
-    """Operatore N(.): premia le mappe con pochi picchi netti.
-
-    Due mappe possono avere lo stesso massimo ma significato opposto: una
-    con un picco isolato indica un elemento distintivo, una con venti picchi
-    simili indica rumore. Si porta la mappa in [0, M] e la si scala per
-    (M - media dei massimi locali)^2: con tanti picchi alti il fattore tende
-    a zero e la mappa viene soppressa.
-    """
     feature_map = feature_map - feature_map.min()
     if feature_map.max() > 0:
         feature_map = feature_map / feature_map.max() * M

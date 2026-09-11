@@ -1,32 +1,7 @@
-"""
-Center prior: baseline che ignora il contenuto dell'immagine.
-
-Genera una Gaussiana 2D fissa al centro. Serve come termine minimo di
-paragone: le persone guardano il centro di una scena piu' della periferia
-(center bias), quindi un modello che non batte questa mappa non sta
-estraendo informazione dall'immagine.
-"""
-
 import numpy as np
 
 
 def center_prior_saliency(image_shape, sigma_frac=0.25):
-    """Gaussiana 2D centrata sull'immagine.
-
-    Parameters
-    ----------
-    image_shape : tuple(int, int)
-        (altezza, larghezza). Si passa la forma, non l'immagine: il
-        contenuto e' irrilevante per questo modello.
-    sigma_frac : float
-        Deviazione standard come frazione delle dimensioni. Proporzionale e
-        non fissa in pixel, altrimenti la macchia avrebbe forma diversa su
-        immagini non quadrate o a risoluzioni diverse.
-
-    Returns
-    -------
-    np.ndarray, float32, shape (altezza, larghezza), valori in [0, 1].
-    """
     height, width = image_shape
 
     cx = width / 2.0
@@ -47,7 +22,6 @@ def center_prior_saliency(image_shape, sigma_frac=0.25):
 
 
 def _normalize(saliency_map):
-    """Riscala una mappa in [0, 1]."""
     minimum, maximum = saliency_map.min(), saliency_map.max()
     if maximum - minimum > 0:
         saliency_map = (saliency_map - minimum) / (maximum - minimum)

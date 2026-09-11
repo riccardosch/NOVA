@@ -1,35 +1,9 @@
-"""
-Spectral Residual (Hou & Zhang, CVPR 2007).
-
-Le immagini naturali hanno mediamente uno spettro di ampiezza molto
-regolare. L'ipotesi del metodo e' che cio' che devia da questo andamento
-atteso sia l'informazione interessante: si stima l'andamento sfocando il log
-dello spettro, lo si sottrae, e il residuo viene riportato nello spazio
-immagine.
-"""
-
 import numpy as np
 import cv2
 
 
 def spectral_residual_saliency(image, sigma=3.0, target_size=(64, 64)):
-    """Saliency map dal residuo spettrale.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        Immagine BGR o gia' in scala di grigi.
-    sigma : float
-        Deviazione standard dello smoothing finale.
-    target_size : tuple(int, int)
-        Risoluzione di lavoro (larghezza, altezza). La saliency e' un
-        fenomeno a bassa frequenza: lavorare a piena risoluzione costa molto
-        senza aggiungere informazione.
-
-    Returns
-    -------
-    np.ndarray, float32, stessa shape dell'input, valori in [0, 1].
-    """
+  
     original_h, original_w = image.shape[:2]
 
     # 1. Scala di grigi (nota: cosi' l'informazione di colore va persa).
