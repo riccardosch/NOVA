@@ -133,3 +133,56 @@ def deepgaze_saliency(image_bgr, device="cpu"):
     saliency = _normalize(saliency)
 
     return saliency
+
+
+
+# ------------------------------------------------------------------ #
+#  Variante fine-tuned — stessa architettura, pesi aggiornati
+# ------------------------------------------------------------------ #
+_model_finetuned = None
+_current_device_finetuned = None
+
+
+def _load_model_finetuned(device, weights_path="deepgaze_finetuned.pt"):
+    """Carica il modello base e ci sovrascrive i pesi fine-tuned (una sola volta)."""
+    global _model_finetuned, _current_device_finetuned
+    if _model_finetuned is None or _current_device_finetuned != device:
+        _check_deps()
+        import torch
+        import deepgaze_pytorch
+
+        _current_device_finetuned = device
+        model = deepgaze_pytorch.DeepGazeIIE(pretrained=True).to(device)
+        state_dict = torch.load(weights_path, map_location=device)
+        model.load_state_dict(state_dict)
+        model.eval()
+        _model_finetuned = model
+    return _model_finetuned
+
+
+def deepgaze_finetuned_saliency(image_bgr, device="cpu"):
+    """Identica a deepgaze_saliency, ma con i pesi fine-tuned su OSIE."""
+    _check_deps()
+    import torch
+
+    model = _load_model_finetuned(device)
+
+    h, w = image_bgr.shape[:2]
+    image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    image_tensor = torch.tensor(
+        image_rgb.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32) / 255.0,
+        device=device,
+    )
+
+    centerbias_np = build_uniform_centerbias(h, w)
+    centerbias_tensor = torch.tensor(centerbias_np[np.newaxis, ...], device=device)
+
+    with torch.no_grad():
+        log_density = model(image_tensor, centerbias_tensor)
+
+    log_density = log_density.squeeze()
+    density = torch.exp(log_density - log_density.max())
+
+    saliency = density.cpu().numpy()
+    saliency = _normalize(saliency)
+    return saliency

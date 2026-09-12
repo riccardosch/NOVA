@@ -50,6 +50,9 @@ def _load_model():
     global _model
     if _model is None:
         _check_deps()
+        import tensorflow as tf
+        # Forza CPU-only per evitare segfault su sistemi senza GPU
+        tf.config.set_visible_devices([], 'GPU')
         import tensorflow_hub as hub
         _model = hub.load(
             "https://www.kaggle.com/models/alexanderkroner/msi-net/tensorFlow2/salicon/1"

@@ -8,3 +8,6 @@ results/*
 !data/eval/.gitkeep
 !data/annotations/.gitkeep
 !results/.gitkeep
+
+# pesi dei modelli scaricati/addestrati
+*.pt
