@@ -109,7 +109,7 @@ def deepgaze_saliency(image_bgr, device="cpu"):
 
     # Tensore NCHW float32
     image_tensor = torch.tensor(
-        image_rgb.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32) / 255.0,
+        image_rgb.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32),
         device=device,
     )
 
@@ -170,7 +170,7 @@ def deepgaze_finetuned_saliency(image_bgr, device="cpu"):
     h, w = image_bgr.shape[:2]
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
     image_tensor = torch.tensor(
-        image_rgb.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32) / 255.0,
+        image_rgb.transpose(2, 0, 1)[np.newaxis, ...].astype(np.float32),
         device=device,
     )
 
