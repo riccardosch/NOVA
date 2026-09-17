@@ -11,3 +11,5 @@ results/*
 
 # pesi dei modelli scaricati/addestrati
 *.pt
+
+*.pdf

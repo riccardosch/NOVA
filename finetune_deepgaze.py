@@ -177,6 +177,14 @@ def train(model, trainable_params, pairs, epochs, batch_size, learning_rate, out
 
     n = len(pairs)
     model.train()
+    # model.train() rimette in modalita' addestramento anche i BatchNorm dei
+    # moduli congelati: requires_grad=False protegge i pesi, ma non i buffer
+    # (running_mean/running_var), che vengono aggiornati a ogni forward
+    # indipendentemente da requires_grad. Li si riporta esplicitamente in
+    # eval() per lasciarli davvero intatti.
+    for module in model.modules():
+        if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+            module.eval()
 
     for epoch in range(epochs):
         order = np.random.permutation(n)
